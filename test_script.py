@@ -1,5 +1,7 @@
 import pytest
-from script import (extract_next_url, get_top_activities, get_owned_repos)
+from unittest.mock import Mock, patch
+
+from script import (extract_next_url, get_top_activities, get_owned_repos, fetch_events, flag_repos)
 
 @pytest.fixture
 def sample_events():
@@ -38,3 +40,62 @@ def test_get_top_activities(events, expected):
 def test_get_owned_repos(sample_events, username, top_activities, expected):
     result = get_owned_repos(sample_events, username, top_activities)
     assert result == expected
+
+def test_flag_repos_success_single_page(mocker, sample_events):
+    mock_fetch = mocker.patch('script.fetch_page')
+    mock_response = Mock()
+    mock_response.json.return_value = sample_events
+    mock_response.headers.get.return_value = ''
+    mock_fetch.return_value = mock_response
+
+    repos = flag_repos('user')
+    assert repos == {'user/repo1', 'user/repo2'}
+    assert mock_fetch.call_count == 1
+
+def test_flag_repos_success_multiple_pages(mocker, sample_events):
+    mock_fetch = mocker.patch('script.fetch_page')
+    
+    mock_response1 = Mock()
+    mock_response1.json.return_value = sample_events
+    mock_response1.headers.get.return_value = '<https://api.github.com/page2>; rel="next"'
+    
+    mock_response2 = Mock()
+    mock_response2.json.return_value = [{'type': 'IssuesEvent', 'repo': {'name': 'user/repo3'}}]
+    mock_response2.headers.get.return_value = ''
+    
+    mock_fetch.side_effect = [mock_response1, mock_response2]
+
+    repos = flag_repos('user')
+    assert repos == {'user/repo1', 'user/repo2', 'user/repo3'}
+    assert mock_fetch.call_count == 2
+
+def test_flag_repos_no_events(mocker):
+    mock_fetch = mocker.patch('script.fetch_page')
+    mock_response = Mock()
+    mock_response.json.return_value = []
+    mock_response.headers.get.return_value = ''
+    mock_fetch.return_value = mock_response
+
+    repos = flag_repos('user')
+    assert repos == set()
+    assert mock_fetch.call_count == 1
+
+def test_flag_repos_nonexistent_user(mocker):
+    mock_fetch = mocker.patch('script.fetch_page')
+    mock_response = Mock()
+    mock_response.json.return_value = []
+    mock_response.headers.get.return_value = ''
+    mock_fetch.return_value = mock_response
+
+    repos = flag_repos('nonexistentuser')
+    assert repos == set()
+    assert mock_fetch.call_count == 1
+
+def test_flag_repos_api_failure(mocker):
+    mock_fetch = mocker.patch('script.fetch_page')
+    mock_fetch.side_effect = Exception("API failure")
+
+    with pytest.raises(Exception) as excinfo:
+        flag_repos('user')
+    assert "API failure" in str(excinfo.value)
+    assert mock_fetch.call_count == 1
