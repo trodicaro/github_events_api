@@ -12,6 +12,7 @@ def sample_events():
     ]
 
 
+# extract_next_url tests
 @pytest.mark.parametrize("link_header,expected", [
     ('<https://api.github.com/page2>; rel="next"', 'https://api.github.com/page2'),
     ('<https://api.github.com/page1>; rel="prev"', None),
@@ -21,6 +22,37 @@ def sample_events():
 def test_extract_next_url(link_header, expected):
     assert extract_next_url(link_header) == expected
 
+
+# fetch_events tests with mocking
+@patch('script.fetch_page')
+def test_fetch_events_single_page(mock_fetch):
+    mock_response = Mock()
+    mock_response.json.return_value = [{'type': 'PushEvent'}]
+    mock_response.headers.get.return_value = ''
+    mock_fetch.return_value = mock_response
+    # print('test', mock_fetch.call_args)
+    events = fetch_events('user', {}, {})
+    assert len(events) == 1
+    assert mock_fetch.call_count == 1
+
+@patch('script.fetch_page')
+def test_fetch_events_multiple_pages(mock_fetch):
+    mock_response1 = Mock()
+    mock_response1.json.return_value = [{'type': 'PushEvent'}]
+    mock_response1.headers.get.return_value = '<https://api.github.com/page2>; rel="next"'
+
+    mock_response2 = Mock()
+    mock_response2.json.return_value = [{'type': 'IssuesEvent'}]
+    mock_response2.headers.get.return_value = ''
+
+    mock_fetch.side_effect = [mock_response1, mock_response2]
+
+    events = fetch_events('user', {}, {})
+    assert len(events) == 2
+    assert mock_fetch.call_count == 2
+
+
+# get_top_activities tests
 @pytest.mark.parametrize("events,expected", [
     ([{'type': 'Push'}, {'type': 'Push'}, {'type': 'Issue'}], ['Push', 'Issue']),
     ([{'type': 'Push'}], ['Push']),
@@ -30,6 +62,7 @@ def test_get_top_activities(events, expected):
     assert get_top_activities(events, 3) == expected
 
 
+# get_owned_repos tests
 @pytest.mark.parametrize("username,top_activities,expected", [
     ('user', ['PushEvent'], {'user/repo1', 'user/repo2'}),
     ('user', ['IssuesEvent'], set()),
@@ -41,6 +74,8 @@ def test_get_owned_repos(sample_events, username, top_activities, expected):
     result = get_owned_repos(sample_events, username, top_activities)
     assert result == expected
 
+
+# flag_repos tests
 def test_flag_repos_success_single_page(mocker, sample_events):
     mock_fetch = mocker.patch('script.fetch_page')
     mock_response = Mock()
